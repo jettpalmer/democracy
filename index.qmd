@@ -1,13 +1,768 @@
 ---
-title: "democracy"
+title: "Project 1 | Final Report"
+author: "Franchesca Garcia, Jett Palmer, Kaatje Matthews-vanKoetsveld"
+format: 
+  html:
+    toc: true
+    theme: cosmo
+code-fold: true
+warning: false
+embed-resources: true
+editor: source
 ---
 
-This is a Quarto website.
+## Context
 
-To learn more about Quarto websites visit <https://quarto.org/docs/websites>.
+### Democracy and Dictatorship
+
+The Democracy and Dictatorship (DD) data were released as part of TidyTuesday on November 5, 2024. TidyTuesday is a weekly project that shares open datasets for users to practice data analysis. This version updates the dataset from Bjørnskov and Rode (2020), building on earlier work by Cheibub et al. ([2010](https://doi.org/10.1007/s11127-009-9491-2)) and Alvarez et al. (1996). The dataset was later cleaned and shared on GitHub by Jon Harmon. Bjørnskov and Rode expanded existing data on political regimes by adding more countries, institutional detail, and a clear indicator for both successful and failed coups. They defined coups using three criteria: the goal must be to overthrow the executive, the actors must be connected to the state, and the event must last no longer than a week. This provides a consistent way to identify and compare regime changes. The data include the regime types of countries around the world between the years 1950 and 2020. Each observation (row) represents a country and year. The dataset focuses primarily on whether a country is democratic or not. Using this structure, we can study how often countries move away from democracy and how long those periods last which we call "spells." Building on this, our analysis applies unique visualization techniques and survival analysis methods to examine the duration and hazard of non-democratic spells.
+
+### World Happiness Report
+
+With the first World Happiness report released on April 1st of 2012 by the United Nations General Assembly, this report has now captured self-perception data on global happiness for a near-consecutive 13 years. Today, the survey is supported by the University of Oxford and Gallup and represents over 140 countries. The report was established by the United Nations with the purpose of "giv\[ing\] more importance to happiness and well-being in determining how to achieve and measure social and economic development" (World Happiness Report). Each year, more than 100,000 people take the survey and are asked a happiness ranking question that is translated into their native language.
 
 ```{r}
-1 + 1
+#| code-fold: true
+#| eval: false
+
+# The following code webscrapes the data from the world happiness reports via the Wikipedia webpage
+library(tidyverse)
+library(rvest)
+
+#Reads the html from the World Happiness Report Wikipedia page
+WHR <- read_html("https://en.wikipedia.org/wiki/World_Happiness_Report")
+
+# There are 39 tables, so we need to reduce to the ones we want
+# Get the header nodes
+headers <- WHR |> 
+  html_elements("h3")
+header_text <- headers |> 
+  html_text(trim = TRUE)
+
+# Creates the patterns to match the header nodes
+years <- 2013:2025
+targets <- paste0(years, " report")
+
+# Only keeps the report headers
+target_idx <- str_detect(header_text, str_c(targets, collapse = "|"))
+target_headers <- headers[target_idx]
+target_labels <- header_text[target_idx]
+
+
+# Function takes table following the specified header. 
+get_WHR_table <- function(header) {
+  header |>
+    html_element(xpath = "following::table[1]") |>
+    html_table(fill=TRUE)
+}
+
+# Retreive tables
+WHR_tables <- target_headers |>
+  map(get_WHR_table)
+
+# Add year column
+clean_whr <- function(df, year) {
+  if (year == 2016) {
+    # Third row is the real column names
+    colnames(df) <- as.character(unlist(df[3, ]))
+    # drop the 2 rows with messy column names
+    df <- df[-c(1, 2, 3), 1:4]
+  } else {
+    # Second row is the real column names
+    colnames(df) <- as.character(unlist(df[2, ]))
+    # drop the 2 rows with messy column names
+    df <- df[-c(1, 2), ]
+    # drop extra empty columns
+    df <- df[, !is.na(colnames(df))]
+  }
+
+  # reset row names
+  rownames(df) <- NULL
+  # Add year as a column
+  df <- df |> 
+    mutate(year = as.integer(year))
+  
+  # Year specific problems
+  if (year == 2013) {
+    df |> 
+      rename(country_name = Country,
+             `Overall rank` = `Rank[61]`,
+             Score = Happiness)
+  } else if (year == 2016) {
+    df |>
+      rename(country_name = Country,
+             `Overall rank` = `Overall Rank[58][59]`)
+  } else if (year ==  2017) {
+    df |> 
+      filter_out(Country %in% c("Europe[a]", "World")) |>
+      rename(country_name = Country,
+             `Overall rank` = `Overall Rank`)
+  } else if (year == 2023) {
+    df |> 
+      mutate(`Country or region` = str_remove_all(`Country or region`, 
+                                                   "\\*")) |> 
+      rename(country_name = `Country or region`) |> 
+      slice(-n())
+  } else {
+    df |> 
+      rename(country_name = `Country or region`)
+  }
+}
+
+# runs function on the list of dataframes to clean
+# Different tables have different issues
+years <- c(2025, 2024, 2023, 2022, 2020, 2019, 2018, 2017, 2016, 2013)
+WHR_tables2 <- map2(WHR_tables, years, .f = clean_whr)
+#Bind the rows of all the individual year tables
+WHR_table <- bind_rows(WHR_tables2)
 ```
 
-blah
+### World Bank Group
+
+World Bank Group is a collection of internationally-operating organizations that aim to reduce global poverty through sustainable development and financing. Their operations and mission are highly data-driven, and they provide a breadth of open-source, global welfare data to the public via their API. Most datasets date back several decades, represent hundreds of countries, and vary on completeness. Datasets associated with their products and services (e.g., lending portfolios, asset management) are created and updated internally. Other global development data are sourced via World Bank partners, including governments, international agencies, regional development banks, donors, and others. We accessed country-level data on population, life-expectancy, and education-related variables.
+
+```{r}
+#| code-fold: true
+#| eval: false
+
+# The following code accesses country level data from the World Bank API
+library(tidyverse)
+library(httr)
+library(tidyjson)
+library(jsonlite)
+library(glue)
+
+# Create function that accesses country-level variable from World Bank API
+
+get_indicator <- function(country_code, indicator_code) {
+  
+  url <- glue("https://api.worldbank.org/v2/country/{country_code}/indicator/{indicator_code}?format=json&per_page=100")
+  
+  if(httr::status_code(GET(url)) == 200){
+  
+  json <- GET(url) |>
+    (\(x) x$content)() |>
+    rawToChar() |>
+    fromJSON()
+  
+    if (length(json) < 2 || is.null(json[[2]])) {
+      return(NULL)
+    }
+  
+    if(is.data.frame(json[[2]])) {
+      indicator_name = str_to_snake(json[[2]]$indicator$value[1])
+      
+      json[[2]] |>
+      select(country_code = countryiso3code, 
+             year = date, 
+             value) |>
+      mutate(year = as.integer(year),
+             indicator = indicator_name)
+    }
+    else{
+      return(NULL)
+    }
+  }
+  else{
+    return(NULL)
+  }
+}
+
+# Create vectors for unique country codes and variables of interest based on World Bank variable codes
+
+country_codes <- democracy_data$country_code |>
+  unique()
+
+indicators <- c("SP.POP.TOTL",
+                "SP.POP.GROW",
+                "SP.DYN.CBRT.IN",
+                "SP.DYN.CDRT.IN",
+                "SP.DYN.LE00.MA.IN",
+                "SP.DYN.LE00.FE.IN",
+                "SE.PRM.ENRR",
+                "SE.SEC.ENRR",
+                "SE.TER.ENRR")
+
+# Iterate function over countries and variables of interest
+
+people_data <- list()
+
+for (c in country_codes) {
+  for (i in indicators) {
+
+    temp <- get_indicator(c, i)
+
+    if (!is.null(temp)) {
+      people_data[[length(people_data) + 1]] <- temp
+    }
+  }
+}
+
+people <- bind_rows(people_data)
+
+people <- people |>
+  pivot_wider(names_from = indicator,
+              values_from = value)
+```
+
+## Research Questions
+
+1.  How long does it take for countries that transition away from democracy to return to it and what factors influence this?
+2.  How do welfare indicators (e.g., population, happiness, life expectancy) differ across political regimes?
+
+```{r}
+#| label: dependencies
+#| output: false
+
+# packages here
+library(tidyverse)
+library(gt)
+library(countrycode)
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(ggtext)
+library(here)
+library(ggalluvial)
+library(ggfittext)
+library(paletteer)
+library(survival)
+library(gtsummary)
+library(htmltools)
+```
+
+```{r}
+#| label: load-data
+
+# Load in master dataset joined from 3 sources above
+# We saved this locally to avoid re-scraping on every render
+democracy <- read_csv(here("Data", "democracy.csv"))
+
+# Save global map geometries
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+# Combine democracy data with global map geometries
+world_democracy <- world |>
+  left_join(democracy, by = c("adm0_a3" = "country_code"))
+```
+
+## Research Question 1: Non-Democratic Spells
+
+### Summaries & Visualizations
+
+#### World Map of Democracy
+
+```{r}
+#| label: map-democracy-or-not-map
+#| fig-cap: "Fig 1. World map of democratic and non-democratic countries"
+
+world_democracy |>
+  ggplot() +
+  geom_sf(aes(fill = factor(is_democracy,
+                            levels = c(FALSE, TRUE),
+                            labels = c("No", "Yes"))),
+          linewidth = 0.05) +
+  labs(title = "<span style='color:steelblue'><b>Democratic</b></span> and <span style='color:#ee6b6e'><b>Non-Democratic</b></span> Regimes Around the Globe",
+       subtitle = "Non-Democratic Regimes Conentrated In Africa & Asia",
+       alt = "World map showing countries colored by regime type. Democratic countries are shown in blue, and non-democratic countries are shown in red.") +
+  scale_fill_manual(values = c("No" = "#ee6b6e",
+                               "Yes" = "steelblue")) +
+  theme_bw() +
+  theme(legend.position = "none",
+        plot.title = element_markdown())
+```
+
+Figure 1 shows countries' regime types in the most recent year available, with democratic countries in blue and non-democratic countries in red. Non-democratic regimes are more concentrated in regions such as Africa, the Middle East, and Southeast Asia.
+
+#### Flow of Change in Regime Types
+
+```{r}
+#| label: sankey-plot
+#| fig-cap: "Fig 2. Sankey plot of regime changes from past to present (1950-2020)"
+
+# create frequency data for sankey plot
+
+regime_change_freq <- democracy |>
+  arrange(country_code, year) |>
+  group_by(country_code) |>
+  mutate(post_regime = lead(regime_category)) |>
+  filter((year == min(year) 
+          & regime_category != post_regime) | 
+           regime_category != post_regime)  |>
+  mutate(regime_category = ifelse(regime_category %in% c("Parliamentary democracy",
+                                                         "Mixed democratic",
+                                                         "Presidential democracy",
+                                                         "Civilian dictatorship",
+                                                         "Military dictatorship",
+                                                         "Royal dictatorship"),
+                                  str_to_title(regime_category),
+                                  "Other"),
+         post_regime = ifelse(post_regime %in% c("Parliamentary democracy",
+                                                 "Mixed democratic",
+                                                 "Presidential democracy",
+                                                 "Civilian dictatorship",
+                                                 "Military dictatorship",
+                                                 "Royal dictatorship"),
+                              str_to_title(post_regime),
+                              "Other")) |>
+  ungroup(country_code) |>
+  count(regime_category, post_regime)
+
+
+# reorder regime categories from democratic to dictatorial
+
+regime_change_freq <- regime_change_freq |>
+  mutate(regime_category  = factor(regime_category,
+                                   levels = c("Royal Dictatorship",
+                                              "Military Dictatorship",
+                                              "Civilian Dictatorship",
+                                              "Presidential Democracy",
+                                              "Mixed Democratic",
+                                              "Parliamentary Democracy",
+                                              "Other")),
+         post_regime = factor(post_regime,
+                              levels = c("Royal Dictatorship",
+                                         "Military Dictatorship",
+                                         "Civilian Dictatorship",
+                                         "Presidential Democracy",
+                                         "Mixed Democratic",
+                                         "Parliamentary Democracy",
+                                         "Other")))
+
+# create sankey plot
+
+cols <- c(
+  "#E69F00",
+  "#009E73",
+  "#56B4E9",
+  "#F0E442",
+  "#0072B2",
+  "#ee6b6e",
+  "#808080"
+)
+
+regime_change_freq |>
+  ggplot(aes(y = n,
+             axis1 = regime_category,
+             axis2 = post_regime)) +
+  geom_alluvium(aes(fill = as.factor(regime_category))) +
+  geom_stratum() +
+  geom_fit_text(stat = "stratum",
+                aes(label = str_wrap(after_stat(stratum), width = 12)),
+                width = 0.25) +
+  theme_minimal() +
+  labs(title = "Regime Changes",
+       x = "Regime",
+       y = "Frequency",
+       fill = "Old Regime",
+       alt = "Sankey plot showing changes in political regime categories from old to new. Flows are colored by the old, or itinital, regime of the change. Regime categories for both axes include Royal Dictatorship, Military Dictatorship, Civilian Dictatorship, Presidential Democracy, Mixed Democracy, and Parliamentary Democracy (from least to most democratic). Each axis also includes an Other category comprised of non sovereign nations. Most changes to democracies are from military or civilian dictatorships.") +
+  scale_x_discrete(limits = c("Old Regime", "New Regime")) +
+  scale_fill_manual(values = cols)
+
+```
+
+Figure 2 presents a Sankey diagram of changes in political regime categories from 1950 to 2020, with flows colored by initial regime. Most transitions into democratic regimes originate from military or civilian dictatorship.
+
+#### Percent of Dictatorships Regimes by Country
+
+```{r}
+#| label: percent-dictatorships-per-country-table
+
+# Calculates the number of regime changes for a given country
+count_regimes <- function(country) {
+
+  democracy |>
+    filter(country_code == country) |>
+    arrange(year) |>
+    mutate(prev_regime = lag(regime_category)) |>
+    filter(year == min(year) | regime_category != prev_regime) |>
+    nrow()
+  
+}
+
+# Calculates the number of regimes that were dictatorships for a given country
+# Regime index of 3, 4, or 5 indicates a dictatorship
+count_dictatorships <- function(country) {
+
+  democracy |>
+    filter(country_code == country) |>
+    arrange(year) |>
+    mutate(prev_regime = lag(regime_category)) |>
+    filter(year == min(year) | regime_category != prev_regime, 
+           regime_category_index >= 3) |>
+    nrow()
+  
+}
+
+
+table1 <- democracy |>
+  distinct(country_code, country_name) |>
+  # Uses map to iteratively apply the custom functions above and calculates the 
+  # proportion of regimes that were/are dictatorships in each country
+  mutate(n_regimes = map_dbl(country_code, count_regimes),
+         n_dicts = map_dbl(country_code, count_dictatorships),
+         prop_dict = n_dicts/n_regimes) |>
+  select(country_name, n_regimes, prop_dict) |>
+  arrange(desc(n_regimes)) |>
+  gt() |>
+  cols_label(country_name = "Country", 
+             n_regimes = "Number of Regimes",
+             prop_dict = "Percent Dictatorship") |>
+  tab_style(cell_text(weight = "bold"),
+            locations = cells_column_labels(everything())) |>
+  fmt_percent(columns = prop_dict) |>
+  data_color(prop_dict,
+             palette = "Blues") |>
+  tab_caption(caption = md("Table 1. Counts of regimes per country, with the percent of regimes that were dictatorships"))
+
+div(
+  style = "max-height: 400px; overflow-y: auto;",
+  table1
+)
+```
+
+<br> Table 1 summarizes the number of regime types by country and the percentage classified as dictatorships over the 1950-2020 period, noting that data may be incomplete for some countries. Countries with a larger number of regimes show wide variation in dictatorship prevalence, ranging from 0% to 100%.
+
+#### Governance Types by World Region
+
+```{r}
+#| label: governance-by-world-region-table
+
+democracy <- democracy |>
+  # Creates the region column using the countrycode package
+  mutate(region = countrycode(country_code,
+                              origin = 'iso3c',
+                              destination = 'region',
+                              # Custom matches for the codes that don't find match
+                              custom_match = c('ZAR' = 'Sub-Saharan Africa',
+                                               'GER' = 'Europe & Central Asia',
+                                               'NUR' = 'East Asia & Pacific',
+                                               'PRI' = 'Latin America & Caribbean',
+                                               'ROM' = 'Europe & Central Asia'
+                                               )
+                              )
+         )
+
+democracy |>
+  group_by(region) |>
+  # Proportions of each form of governance
+  summarize(n = n(),
+            prop_demo = sum(is_democracy, na.rm = TRUE)/n,
+            prop_pres = sum(is_presidential, na.rm = TRUE)/n,
+            prop_mon = sum(is_monarchy, na.rm = TRUE)/n,
+            prop_comw = sum(is_commonwealth, na.rm = TRUE)/n,
+            prop_colon = sum(is_colony, na.rm = TRUE)/n,
+            prop_comm = sum(is_communist, na.rm = TRUE)/n
+            ) |>
+  gt() |>
+  cols_label(region = "World Region", 
+             n = "Number of Observations",
+             prop_demo = "Percent Democratic",
+             prop_pres = "Percent Presidential",
+             prop_mon = "Percent Monarchy",
+             prop_comw = "Percent Commonwealth",
+             prop_colon = "Percent Colony",
+             prop_comm = "Percent Communist",
+             ) |>
+  tab_style(cell_text(weight = "bold"),
+            locations = cells_column_labels(everything())) |>
+  fmt_percent(columns = -c(n, region)) |>
+  fmt_integer(columns = n) |> 
+  tab_caption(caption = md("Table 2. Percent of observations under each form of governance, by World Region")) |>
+  tab_spanner(label = "Governance Type (%)",
+              columns = -c(n, region)) |>
+  data_color(columns = -c(n, region),
+             palette = "Blues")
+```
+
+Table 2 summarizes the percentage of country-year observations classified under each form of governance. Note that these categories are not mutually exclusive as a country call fall into multiple forms at once (e.g., a country can be both democratic and presidential).
+
+### Modeling
+
+```{r}
+#| label: survival-model-km
+
+# Survival model setup
+
+survival_base <- democracy |>
+  arrange(country_code, year) |>
+  group_by(country_code) |>
+  mutate(lost_democracy = is_democracy == FALSE & lag(is_democracy, default = TRUE),
+         spell_id = cumsum(lost_democracy),
+         next_is_democracy = lead(is_democracy))
+
+spell_starts <- survival_base |>
+  filter(lost_democracy == TRUE) |>
+  select(country_code,
+         spell_id,
+         region,
+         is_communist,
+         is_multiparty)
+
+survival <- survival_base |>
+  filter(is_democracy == FALSE) |>
+  group_by(country_code, spell_id) |>
+  summarize(start_year = min(year),
+            end_year = max(year),
+            returned_to_democracy = any(next_is_democracy == TRUE, na.rm = TRUE),
+            time = end_year - start_year + 1,
+            .groups = "drop")
+
+survival <- survival |>
+  left_join(spell_starts, by = c("country_code", "spell_id"))
+
+# Survival analysis model
+km <- survfit(Surv(time, returned_to_democracy) ~ 1,
+              data = survival)
+
+plot(km,
+     xlab = "Years Since Losing Democracy",
+     ylab = "")
+
+title(main = "Probability of Remaing Non-Democratic Decreases Over Time", adj = 0)
+```
+
+```{r}
+#| label: survival-model-cox
+
+# Cox Proportional Hazards Model
+cox_model <- coxph(Surv(time, returned_to_democracy) ~
+                     region + 
+                     is_communist + 
+                     is_multiparty,
+                   data = survival)
+
+#summary(cox_model)
+
+tbl_regression(cox_model, 
+               exponentiate = TRUE,
+               label = list(
+                 is_communist ~ "Communist",
+                 region ~ "Region",
+                 is_multiparty ~ "Multiparty System"
+                 )
+               )|> 
+  bold_labels() |>
+  as_gt() |>
+  tab_style(cell_text(weight = "bold"),
+            locations = cells_column_labels(everything())) |>
+  tab_caption(caption = md("Cox Proportional Hazards Model Coefficent Estimates"))
+```
+
+There are 255 non-democratic spells, 178 of which return to democracy. The Cox Proportional Hazards Model significantly predicts "time to democracy" (p \< 2e-16)
+
+**Hazard Ratio Interpretations:**
+
+- Countries in Europe & Central Asia return to democracy about **2.67 times faster** than the baseline region, East Asia & Pacific (p = 0.013).
+
+- Countries in Latin America & the Caribbean return to democracy about **3.31 times faster** than the baseline region, East Asia & Pacific (p \< 0.001).
+
+- Countries in the Middle East & North Africa are about **96.4% less likely** to return to democracy than the baseline region, East Asia & Pacific (p = 0.001).
+
+- Communist regimes are about **78% less likely** to return to democracy compared to non-communist regimes (p \< 0.001).
+
+- There is insufficient evidence to conclude that multiparty systems affect the likelihood of a non-democratic regime returning to democracy (p = 0.42).
+
+## Research Question 2: Global Welfare & Regimes
+
+### Summaries & Visualizations
+
+#### World Map of Population
+
+```{r}
+#| label: population-map
+#| fig-cap: "Fig 3. World map of population distribution"
+# happiness or population
+
+world_democracy |>
+  ggplot() +
+  geom_sf(aes(fill = population_total),
+          linewidth = 0.05) +
+  labs(
+    title = "<b>Global Population Concentrated In Asia</b>",
+    fill = "Population",
+    alt = "World map showing countries shaded by total population, using a blue color gradient.") +
+  scale_fill_gradient(
+    low = "#deebf7",
+    high = "#08519c",
+    na.value = "grey90") +
+  theme_bw() +
+  theme(
+    legend.position = "right",
+    plot.title = element_markdown())
+```
+
+Figure 3 shows the distribution of population across countries, with darker shades of blue indicating larger populations. Population is heavily concentrated in a few countries, notably China and India, while much of Africa, South America, and Oceania has relatively lower population densities by comparison.
+
+#### Life Expectancy by Regime Type
+
+```{r}
+#| label: life-expectancy-line-plot
+#| fig-cap: "Fig 4. Life graph of life expectancy by regime over time"
+#| message: false
+
+# Create set of "default regimes" which consist of the top five most common
+
+default_regimes <- c(
+  "Parliamentary democracy",
+  "Presidential democracy",
+  "Mixed democratic",
+  "Civilian dictatorship",
+  "Military dictatorship"
+)
+
+# Create graph of life expectancy over time by regime category (top 5)
+
+# This data wrangling step allows for the color gradient to match the
+# life expectancy order and computes the averages
+
+plot_data <- democracy |>
+  filter(regime_category %in% default_regimes) |>
+  mutate(
+    avg_life_expectancy = (
+      life_expectancy_at_birth_male_years +
+      life_expectancy_at_birth_female_years) / 2) |>
+  filter(
+    !is.na(year),
+    !is.na(avg_life_expectancy)) |>
+  group_by(year, regime_category) |>
+  summarize(
+    n = n(),
+    avg_life_expectancy = mean(avg_life_expectancy, na.rm = TRUE))
+
+regime_order <- plot_data |>
+  filter(year == 2020) |>
+  arrange(avg_life_expectancy) |>
+  pull(regime_category)
+
+plot_data |>
+  mutate(
+    regime_category = factor(regime_category, levels = regime_order)) |>
+  ggplot(aes(x = year, 
+             y = avg_life_expectancy, 
+             color = regime_category)) +
+  geom_line(linewidth = 1) +
+  scale_color_manual(
+    values = c(
+      "#c6dbef",
+      "#9ecae1",
+      "#6baed6",
+      "#3182bd",
+      "#08519c")) +
+  labs(
+    title = "<b>Average Life Expectancy Increases Over Time Across Regimes</b>",
+    x = "Year",
+    y = NULL,
+    color = "Regime Category",
+    alt = "Line plot of average life expectancy over time in years, colored by regime type. Regime Types include: Parliamentary democracy, mixed democratic, presidential democracy, civilian dictatorship, and military dictaorship. All 5 lines tend to increase over time. The more democratic regimes tend to have higher lines, indicating a higher average life expectancy.") +
+  theme_minimal() +
+  guides(color = guide_legend(reverse = TRUE)) +
+  theme(plot.title = element_markdown())
+```
+
+Figure 4 shows that life expectancy generally increases over time across all regime types. More democratic regimes tend to have higher average life expectancy compared to less democratic ones across all time.
+
+#### Democratic Principles for Top Regimes
+
+```{r}
+#| label: democratic-principles-table
+
+# regimes is optional input as a vector of regime categories
+# the default argument looks at the 4 we wish to compare
+summarize_regimes <- function(regimes = c("Civilian dictatorship",
+                                          "Parliamentary democracy",
+                                          "Military dictatorship",
+                                          "Presidential democracy")) {
+  
+  # For each regime type the proportion of observations with each democratic
+  # principle is calculated
+  democracy |>
+    filter(regime_category %in% regimes) |>
+    group_by(regime_category) |>
+    summarize(
+      n = n(),
+      prop_demo = sum(is_democracy, na.rm = TRUE) / n,
+      prop_suffrage = sum(has_full_suffrage, na.rm = TRUE) / n,
+      prop_multiparty = sum(is_multiparty, na.rm = TRUE) / n,
+      prop_free_fair = sum(has_free_and_fair_election, na.rm = TRUE) / n,
+      prop_alternation = sum(has_alternation, na.rm = TRUE) / n
+    ) |>
+    gt() |>
+    cols_label(
+      regime_category = "Regime",
+      n = "Number of Observations",
+      prop_demo = "Democratic",
+      prop_suffrage = "Full Voting Rights",
+      prop_multiparty = "Multi-Party Elections",
+      prop_free_fair = "Free & Fair Elections",
+      prop_alternation = "Rotating Top Office"
+    ) |>
+    tab_style(
+      cell_text(weight = "bold"),
+      locations = cells_column_labels(everything())
+    ) |>
+    fmt_percent(columns = -c(n, regime_category)) |>
+    fmt_integer(columns = n) |> 
+    tab_caption(
+      caption = md("Table 3. Percent of observations demonstrating democratic principles, by regime category")
+    ) |>
+    tab_spanner(
+      label = "Democratic Principles Represented (% Observations)",
+      columns = -c(n, regime_category)
+    ) |>
+    data_color(
+      columns = -c(n, regime_category),
+      palette = "Blues"
+    )
+}
+
+summarize_regimes()
+```
+
+Table 3 shows the percentage of country-year observations that exhibit each of the five democratic principles. Parliamentary and presidential democracies have high percentages across all principles. In contrast, civilian and military dictatorships rarely meet this criteria, with the exception of full voting rights, which appears relatively more common.
+
+#### Happiness by Regime Type
+
+```{r}
+#| label: happiness-by-regime-table
+
+# Table numeric summary of happiness score by regime.
+happiness_dist <- function(regime) {
+  democracy |>
+    filter(regime_category == regime) |>
+    filter_out(is.na(score)) |>
+    summarize(n=n(),
+              avg_happy = mean(score),
+              sd_happy = sd(score),
+              min_happy = min(score),
+              med_happy = median(score),
+              max_happy = max(score)
+    )
+}
+
+democracy |>
+  distinct(regime_category) |>
+  mutate(map_df(.x = regime_category,
+                .f = happiness_dist)) |>
+  filter(n >= 10) |> 
+  arrange(desc(avg_happy)) |>
+  gt() |>
+  cols_label(regime_category = "Regime", 
+             n = "Number of Observations",
+             avg_happy = "Average Happiness Score",
+             sd_happy = "Standard Deviation Happiness Score",
+             min_happy = "Minimum Happiness Score",
+             med_happy = "Median Happiness Score",
+             max_happy = "Maximum Happiness Score"
+             ) |>
+  tab_style(cell_text(weight = "bold"),
+            locations = cells_column_labels(everything())) |>
+  fmt_number(columns = -c(n, regime_category), decimals = 2) |> 
+  tab_caption(caption = md("Table 4. Happiness Score Summary by Regime Category")) |>
+  tab_footnote(footnote = "Happiness Score scraped from World Happiness Report 
+  Wikipedia page, Scores are out of 10") |>
+  data_color(columns = -c(n, regime_category),
+             palette = "Blues")
+```
+
+Table 4 shows that military and civilian dictatorships tend to have lower reported happiness, whereas parliamentary democracies and royal dictatorships tend to have higher reported happiness.
