@@ -1,5 +1,5 @@
 ---
-title: "Project 1 | Final Report"
+title: "Global Government: Will Democracy Prevail?"
 author: "Franchesca Garcia, Jett Palmer, Kaatje Matthews-vanKoetsveld"
 format: 
   html:
@@ -12,6 +12,8 @@ editor: source
 ---
 
 ## Context
+
+This report lifts the curtain on some of the social and welfare markers that are associated with democratic and non-democratic regimes. When a country overthrows democracy, how long does the new regime last? What contributes to its downfall? We'll start by exploring our three, key datasets for this report.
 
 ### Democracy and Dictatorship
 
@@ -205,7 +207,9 @@ people <- people |>
               values_from = value)
 ```
 
-## Research Questions
+We'll explore the following research questions throughout this report.
+
+### Research Questions
 
 1.  How long does it take for countries that transition away from democracy to return to it and what factors influence this?
 2.  How do welfare indicators (e.g., population, happiness, life expectancy) differ across political regimes?
@@ -246,9 +250,9 @@ world_democracy <- world |>
   left_join(democracy, by = c("adm0_a3" = "country_code"))
 ```
 
-## Research Question 1: Non-Democratic Spells
+## Exploring Non-Democratic Spells
 
-### Summaries & Visualizations
+Let's start by taking a pulse on the modern-day presence and absence of democracy around the world. Figure 1 shows countries' regime types in 2020, with democratic countries in blue and non-democratic countries in red. Non-democratic regimes are more concentrated in regions such as Africa, the Middle East, and Southeast Asia.
 
 #### World Map of Democracy
 
@@ -272,13 +276,14 @@ world_democracy |>
         plot.title = element_markdown())
 ```
 
-Figure 1 shows countries' regime types in the most recent year available, with democratic countries in blue and non-democratic countries in red. Non-democratic regimes are more concentrated in regions such as Africa, the Middle East, and Southeast Asia.
+A Sankey plot can help us visualize regime-change patterns on the global scale. We see that most transitions into democratic regimes originate from military or civilian dictatorships. There's also substantial movement between civilian dictatorships and military dictatorships.
 
 #### Flow of Change in Regime Types
 
 ```{r}
 #| label: sankey-plot
 #| fig-cap: "Fig 2. Sankey plot of regime changes from past to present (1950-2020)"
+#| warning: false
 
 # create frequency data for sankey plot
 
@@ -361,7 +366,7 @@ regime_change_freq |>
 
 ```
 
-Figure 2 presents a Sankey diagram of changes in political regime categories from 1950 to 2020, with flows colored by initial regime. Most transitions into democratic regimes originate from military or civilian dictatorship.
+Cutting across decades of political history, we can identify the countries with the greatest proportion of dictator-led regimes and the greatest number of regime changes. Table 1 summarizes the number of regime types by country and the percentage classified as dictatorships over the 1950-2020 period, noting that data may be incomplete for some countries. Countries with a larger number of regimes show extreme variation in dictatorship prevalence, ranging from 0% to 100%.
 
 #### Percent of Dictatorships Regimes by Country
 
@@ -420,8 +425,8 @@ div(
   table1
 )
 ```
-
-<br> Table 1 summarizes the number of regime types by country and the percentage classified as dictatorships over the 1950-2020 period, noting that data may be incomplete for some countries. Countries with a larger number of regimes show wide variation in dictatorship prevalence, ranging from 0% to 100%.
+<br>
+Table 2 summarizes the percentage of country-year observations classified under each form of governance. Note that these categories are not mutually exclusive, as a country can fall into multiple forms at once (e.g., a country can be both democratic and presidential). Democracy is most prevalent in North and Latin America. Communism constitutes over 32% of European and Central Asian regimes.
 
 #### Governance Types by World Region
 
@@ -475,7 +480,7 @@ democracy |>
              palette = "Blues")
 ```
 
-Table 2 summarizes the percentage of country-year observations classified under each form of governance. Note that these categories are not mutually exclusive as a country call fall into multiple forms at once (e.g., a country can be both democratic and presidential).
+A statistical model for the time until a country that lost democracy returns to democracy (i.e., a democratic spell) can help us investigate these regional and regime characteristics more formally.
 
 ### Modeling
 
@@ -549,7 +554,7 @@ tbl_regression(cox_model,
   tab_caption(caption = md("Cox Proportional Hazards Model Coefficent Estimates"))
 ```
 
-There are 255 non-democratic spells, 178 of which return to democracy. The Cox Proportional Hazards Model significantly predicts "time to democracy" (p \< 2e-16)
+There are 255 non-democratic spells, 178 of which return to democracy. The Cox Proportional Hazards Model significantly predicts "time to democracy" (p \< 2e-16).
 
 **Hazard Ratio Interpretations:**
 
@@ -563,9 +568,9 @@ There are 255 non-democratic spells, 178 of which return to democracy. The Cox P
 
 - There is insufficient evidence to conclude that multiparty systems affect the likelihood of a non-democratic regime returning to democracy (p = 0.42).
 
-## Research Question 2: Global Welfare & Regimes
+## Relationships with Global Welfare
 
-### Summaries & Visualizations
+Again, let's start by taking a pulse on the status of global population. Figure 3 shows the distribution of population across countries, with darker shades of blue indicating larger populations. Population is heavily concentrated in a few countries, notably China and India, while much of Africa, South America, and Oceania has relatively lower population densities by comparison.
 
 #### World Map of Population
 
@@ -592,7 +597,7 @@ world_democracy |>
     plot.title = element_markdown())
 ```
 
-Figure 3 shows the distribution of population across countries, with darker shades of blue indicating larger populations. Population is heavily concentrated in a few countries, notably China and India, while much of Africa, South America, and Oceania has relatively lower population densities by comparison.
+Another country-level characteristic that we think may be related with political regimes is life expectancy. Figure 4 shows that life expectancy generally increases over time across all regime types. More democratic regimes tend to have higher average life expectancy compared to less democratic ones across all time.
 
 #### Life Expectancy by Regime Type
 
@@ -660,7 +665,17 @@ plot_data |>
   theme(plot.title = element_markdown())
 ```
 
-Figure 4 shows that life expectancy generally increases over time across all regime types. More democratic regimes tend to have higher average life expectancy compared to less democratic ones across all time.
+The four most common political regimes around the world in no particular order are:
+
+- Civilian dictatorships
+
+- Parliamentary democracies
+
+- Military dictatorships
+
+- Presidential democracies
+
+Let's compare these regimes by their implementation of democratic principles, like suffrage and fair elections. Table 3 shows the percentage of country-year observations that exhibit five different democratic principles. Parliamentary and presidential democracies have high percentages across all principles. In contrast, civilian and military dictatorships rarely meet this criteria, with the exception of full voting rights, which appears relatively more common.
 
 #### Democratic Principles for Top Regimes
 
@@ -719,7 +734,7 @@ summarize_regimes <- function(regimes = c("Civilian dictatorship",
 summarize_regimes()
 ```
 
-Table 3 shows the percentage of country-year observations that exhibit each of the five democratic principles. Parliamentary and presidential democracies have high percentages across all principles. In contrast, civilian and military dictatorships rarely meet this criteria, with the exception of full voting rights, which appears relatively more common.
+We're also interested in comparing citizens' perceived happiness and life satisfaction around the world. Table 4 shows that military and civilian dictatorships tend to have lower reported happiness, whereas parliamentary democracies and royal dictatorships tend to have higher reported happiness.
 
 #### Happiness by Regime Type
 
@@ -765,4 +780,6 @@ democracy |>
              palette = "Blues")
 ```
 
-Table 4 shows that military and civilian dictatorships tend to have lower reported happiness, whereas parliamentary democracies and royal dictatorships tend to have higher reported happiness.
+## Conclusion
+
+This report examined several significant relationships among political regime, geographic, and welfare indicators. Although democracies are sometimes overthrown, they are often restored by the people they serve. The analysis of non-democratic spells suggest that region, civil liberties, and political priorities play important roles in the sustainability of a governmental system.
