@@ -128,7 +128,6 @@ World Bank Group is a collection of internationally-operating organizations that
 #| eval: false
 
 # The following code accesses country level data from the World Bank API
-library(tidyverse)
 library(httr)
 library(tidyjson)
 library(jsonlite)
@@ -425,8 +424,8 @@ div(
   table1
 )
 ```
-<br>
-Table 2 summarizes the percentage of country-year observations classified under each form of governance. Note that these categories are not mutually exclusive, as a country can fall into multiple forms at once (e.g., a country can be both democratic and presidential). Democracy is most prevalent in North and Latin America. Communism constitutes over 32% of European and Central Asian regimes.
+
+<br> Table 2 summarizes the percentage of country-year observations classified under each form of governance. Note that these categories are not mutually exclusive, as a country can fall into multiple forms at once (e.g., a country can be both democratic and presidential). Democracy is most prevalent in North and Latin America. Communism constitutes over 32% of European and Central Asian regimes.
 
 #### Governance Types by World Region
 
@@ -531,19 +530,22 @@ title(main = "Probability of Remaing Non-Democratic Decreases Over Time", adj = 
 #| label: survival-model-cox
 
 # Cox Proportional Hazards Model
-cox_model <- coxph(Surv(time, returned_to_democracy) ~
-                     region + 
-                     is_communist + 
-                     is_multiparty,
-                   data = survival)
+cox_model_new <- coxph(Surv(time, returned_to_democracy) ~
+                         is_communist +
+                         is_multiparty +
+                         strata(region) +
+                         cluster(country_code),
+                       data = survival)
 
-#summary(cox_model)
+# ph_test <- cox.zph(cox_model_new)
+# ph_test
 
-tbl_regression(cox_model, 
+# summary(cox_model_new)
+
+tbl_regression(cox_model_new,
                exponentiate = TRUE,
                label = list(
                  is_communist ~ "Communist",
-                 region ~ "Region",
                  is_multiparty ~ "Multiparty System"
                  )
                )|> 
@@ -554,19 +556,15 @@ tbl_regression(cox_model,
   tab_caption(caption = md("Cox Proportional Hazards Model Coefficent Estimates"))
 ```
 
-There are 255 non-democratic spells, 178 of which return to democracy. The Cox Proportional Hazards Model significantly predicts "time to democracy" (p \< 2e-16).
+There are 255 non-democratic spells, 178 of which return to democracy. The Cox Proportional Hazards Model significantly predicts "time to democracy" (p = 0.003).
 
 **Hazard Ratio Interpretations:**
 
-- Countries in Europe & Central Asia return to democracy about **2.67 times faster** than the baseline region, East Asia & Pacific (p = 0.013).
+- Communist regimes are about **96% less likely** to return to democracy compared to non-communist regimes (p \< 0.001).
 
-- Countries in Latin America & the Caribbean return to democracy about **3.31 times faster** than the baseline region, East Asia & Pacific (p \< 0.001).
+- There is insufficient evidence to conclude that multiparty systems affect the likelihood of a non-democratic regime returning to democracy (p = 0.65).
 
-- Countries in the Middle East & North Africa are about **96.4% less likely** to return to democracy than the baseline region, East Asia & Pacific (p = 0.001).
-
-- Communist regimes are about **78% less likely** to return to democracy compared to non-communist regimes (p \< 0.001).
-
-- There is insufficient evidence to conclude that multiparty systems affect the likelihood of a non-democratic regime returning to democracy (p = 0.42).
+**Note:** The number of predictors in this model were reduced to satisfy proportional hazard and independence assumptions.
 
 ## Relationships with Global Welfare
 
